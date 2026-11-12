@@ -1,4 +1,4 @@
-name: Build APK and AAB (Auto-Find)
+name: Build Full Android APK and AAB
 
 on:
   push:
@@ -13,12 +13,16 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v7
 
-    - name: Extract and Inspect ZIP
+    - name: Extract ZIP
       run: |
         mkdir -p extracted_project
         unzip -q "*.zip" -d extracted_project
-        echo "=== ZIP এর ভেতরের ফাইল লিস্ট ==="
-        find extracted_project -maxdepth 3
+        if [ $(ls -1 extracted_project | wc -l) -eq 1 ] && [ -d "extracted_project/$(ls -1 extracted_project)" ]; then
+          SUB=$(ls -1 extracted_project)
+          mv extracted_project/"$SUB"/* extracted_project/ 2>/dev/null || true
+          mv extracted_project/"$SUB"/.* extracted_project/ 2>/dev/null || true
+          rmdir extracted_project/"$SUB" 2>/dev/null || true
+        fi
 
     - name: Set up JDK 21
       uses: actions/setup-java@v6
@@ -26,18 +30,26 @@ jobs:
         java-version: '21'
         distribution: 'temurin'
 
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Setup Node.js and Install Dependencies
+      run: |
+        cd extracted_project
+        if [ -f "package.json" ]; then
+          npm install --legacy-peer-deps || true
+          npm run build || true
+          npx cap sync android || true
+        fi
+
     - name: Build APK and Release AAB
       run: |
         GRADLEW_PATH=$(find extracted_project -name "gradlew" | head -n 1)
-        if [ -z "$GRADLEW_PATH" ]; then
-          echo "ERROR: এই ZIP ফাইলের ভেতরে কোনো Android Studio (gradlew) প্রজেক্ট নেই!"
-          exit 1
-        fi
         PROJECT_DIR=$(dirname "$GRADLEW_PATH")
-        echo "Project found at: $PROJECT_DIR"
+        echo "Building in: $PROJECT_DIR"
         cd "$PROJECT_DIR"
         chmod +x gradlew
-        ./gradlew assembleDebug bundleRelease
+        ./gradlew assembleDebug bundleRelease --stacktrace
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v7
